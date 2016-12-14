@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Document</title>
+</head>
+<body>
+
+	<input type="file" name="filetoupload" id=filetoupload>
+
+	<div id="name"></div>
+	<div id="size"></div>
+
+	<button type="button" id="conn">创建连接</button>
+	<button type="button" id="start">开始上传</button>
+	<button type="button" id="pause">暂停</button>
+
+	<span id="progress"></span>
+
+	<div id="msg"></div>
+	
+
+
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+
+	<script>
+		var socket = null;
+		var msg = null;
+		var chunk = 1024 * 1024; //1M
+
+		var blob = null,
+			file = null,
+			start = 0,
+			end = 0;
+
+		var state = 0;
+
+		$('#filetoupload').on('change', function() {
+			file = $(this).get(0).files[0];
+
+			if(file) {
+				var total = file.size;
+
+				if(total >= 1024 * 1024) {
+					total = (Math.round(total*100/(1024*1024))/100) + 'MB';
+				} else {
+					total = (Math.round(total*100/1024)/100) + 'KB';
+				}
+
+				$('#name').html(file.name);
+				$('#size').html(total);
+			}
+		});
+
+		$('#conn').on('click', function() {
+			try {
+				var readystate = ['正在连接', '已建立连接', '正在关闭连接', '已关闭连接'];
+
+				socket = new WebSocket('ws://test.homestead.app:9701');
+
+				socket.onopen = function() {
+					$('#msg').append('<p>Socket状态：'+readystate[socket.readyState]+'</p>');
+				};
+
+				socket.onmessage = function(e) {
+					if(e.data.indexOf('success') !== -1 && state == 1) {
+						if(end == file.size) {
+							localStorage.removeItem(file.lastModifiedDate+'_'+file.name);
+
+							socket.close();
+						} else {
+							processUpload();
+						}
+					}
+				};
+
+				socket.onclose = function() {
+					$('#msg').append('<p>Socket状态：'+readystate[socket.readyState])
+				}
+
+				socket.onerror = function() {
+					$('#msg').append('<p>上传出错!</p>')
+				}
+			} catch (exception) {
+			}
+		})
+
+		$('#pause').on('click', function() {
+			state = 2;
+		})
+
+		$('#start').on('click', function() {
+			processUpload();
+		})
+
+		function processUpload() {
+			if(file) {
+				state = 1;
+
+				end = getLastEndingPoint(file);
+
+				if(end < file.size) {
+					start = end;
+
+					end = Math.min(file.size, start+chunk);
+
+					blob = file.slice(start, end);
+
+					var reader = new FileReader();
+					reader.onload = function(e) {
+						var buffer = e.target.result;
+						socket.send(buffer);
+
+						logProgress(end);
+					}
+
+					reader.readAsArrayBuffer(blob);
+				}
+			}
+		}
+
+		function getLastEndingPoint(file) {
+			var end = localStorage.getItem(file.lastModifiedDate+'_'+file.name);
+
+			if(end) {
+				return parseInt(end);
+			}
+
+			return 0;
+		}
+
+		function logProgress(cur_len) {
+			$('#progress').val(Math.round(cur_len/file.size)*100 + '%');
+
+			localStorage.setItem(file.lastModifiedDate+'_'+file.name, cur_len);
+		}
+	</script>
+</body>
+</html>
